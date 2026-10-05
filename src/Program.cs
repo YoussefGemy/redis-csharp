@@ -115,6 +115,20 @@ async Task HandleClientAsync(Socket client)
             {
                 lock (list)
                 {
+                    if (start < 0)
+                    {
+                        start += list.Count;
+                        if (start < 0)
+                        {
+                            start = 0;
+                        }
+                    }
+
+                    if (stop < 0)
+                    {
+                        stop += list.Count;
+                    }
+
                     if (stop >= list.Count)
                     {
                         stop = list.Count - 1;
