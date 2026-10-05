@@ -8,8 +8,6 @@ Console.WriteLine("Logs from your program will appear here!");
 TcpListener server = new TcpListener(IPAddress.Any, 6379);
 server.Start();
 
-byte[] response = Encoding.UTF8.GetBytes("+PONG\r\n");
-
 while (true)
 {
     Socket client = await server.AcceptSocketAsync(); // wait for client
@@ -25,7 +23,28 @@ async Task HandleClientAsync(Socket client)
         int bytesRead = await client.ReceiveAsync(buffer); // wait for the client's command
         if (bytesRead == 0) break;
 
-        await client.SendAsync(response);
+        string request = Encoding.UTF8.GetString(buffer, 0, bytesRead);
+        string[] parts = request.Split("\r\n");
+        string command = parts[2].ToUpper();
+
+        string reply;
+
+        if (command == "PING")
+        {
+            reply = "+PONG\r\n";
+        }
+        else if (command == "ECHO")
+        {
+            string argument = parts[4];
+            int length = Encoding.UTF8.GetByteCount(argument);
+            reply = $"${length}\r\n{argument}\r\n";
+        }
+        else
+        {
+            reply = "-ERR unknown command\r\n";
+        }
+
+        await client.SendAsync(Encoding.UTF8.GetBytes(reply));
     }
 
     client.Close();
