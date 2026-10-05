@@ -103,6 +103,37 @@ async Task HandleClientAsync(Socket client)
 
             reply = $":{count}\r\n";
         }
+        else if (command == "LRANGE")
+        {
+            string key = parts[4];
+            int start = int.Parse(parts[6]);
+            int stop = int.Parse(parts[8]);
+
+            List<string> items = new();
+
+            if (lists.TryGetValue(key, out List<string>? list))
+            {
+                lock (list)
+                {
+                    if (stop >= list.Count)
+                    {
+                        stop = list.Count - 1;
+                    }
+
+                    for (int i = start; i <= stop; i++)
+                    {
+                        items.Add(list[i]);
+                    }
+                }
+            }
+
+            reply = $"*{items.Count}\r\n";
+
+            foreach (string item in items)
+            {
+                reply += BulkString(item);
+            }
+        }
         else
         {
             reply = "-ERR unknown command\r\n";
