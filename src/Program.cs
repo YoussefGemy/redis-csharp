@@ -88,15 +88,16 @@ async Task HandleClientAsync(Socket client)
         else if (command == "RPUSH")
         {
             string key = parts[4];
-            string element = parts[6];
-
             List<string> list = lists.GetOrAdd(key, _ => new List<string>());
 
             int count;
 
             lock (list)
             {
-                list.Add(element);
+                for (int i = 6; i < parts.Length; i += 2)
+                {
+                    list.Add(parts[i]);
+                }
                 count = list.Count;
             }
 
