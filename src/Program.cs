@@ -10,6 +10,7 @@ TcpListener server = new TcpListener(IPAddress.Any, 6379);
 server.Start();
 
 ConcurrentDictionary<string, (string Value, DateTime? ExpiresAt)> store = new();
+ConcurrentDictionary<string, List<string>> lists = new();
 
 while (true)
 {
@@ -83,6 +84,23 @@ async Task HandleClientAsync(Socket client)
             {
                 reply = BulkString(entry.Value);
             }
+        }
+        else if (command == "RPUSH")
+        {
+            string key = parts[4];
+            string element = parts[6];
+
+            List<string> list = lists.GetOrAdd(key, _ => new List<string>());
+
+            int count;
+
+            lock (list)
+            {
+                list.Add(element);
+                count = list.Count;
+            }
+
+            reply = $":{count}\r\n";
         }
         else
         {
