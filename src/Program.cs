@@ -139,18 +139,44 @@ async Task HandleClientAsync(Socket client)
         {
             string key = parts[4];
 
+            bool hasCount = parts.Length > 6;
+
+            int NumberOfElements = 1;
+            if (hasCount)
+            {
+                NumberOfElements = int.Parse(parts[6]);
+            }
+
+            List<string> items = new();
             reply = "$-1\r\n";
 
             if (lists.TryGetValue(key, out List<string>? list))
             {
                 lock (list)
                 {
-                    if (list.Count > 0)
+                    while (list.Count > 0 && NumberOfElements > 0)
                     {
-                        string first = list[0];
+                        items.Add(list[0]);
                         list.RemoveAt(0);
-                        reply = BulkString(first);
+                        NumberOfElements -= 1;
                     }
+                }
+            }
+
+            if (items.Count > 0)
+            {
+                if (hasCount)
+                {
+                    reply = $"*{items.Count}\r\n";
+
+                    foreach (string item in items)
+                    {
+                        reply += BulkString(item);
+                    }
+                }
+                else
+                {
+                    reply = BulkString(items[0]);
                 }
             }
         }
