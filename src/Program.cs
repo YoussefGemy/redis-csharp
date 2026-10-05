@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -7,6 +8,8 @@ Console.WriteLine("Logs from your program will appear here!");
 
 TcpListener server = new TcpListener(IPAddress.Any, 6379);
 server.Start();
+
+ConcurrentDictionary<string, string> store = new();
 
 while (true)
 {
@@ -35,9 +38,29 @@ async Task HandleClientAsync(Socket client)
         }
         else if (command == "ECHO")
         {
-            string argument = parts[4];
-            int length = Encoding.UTF8.GetByteCount(argument);
-            reply = $"${length}\r\n{argument}\r\n";
+            reply = BulkString(parts[4]);
+        }
+        else if (command == "SET")
+        {
+            string key = parts[4];
+            string value = parts[6];
+
+            store[key] = value;
+
+            reply = "+OK\r\n";
+        }
+        else if (command == "GET")
+        {
+            string key = parts[4];
+
+            if (store.TryGetValue(key, out string? value))
+            {
+                reply = BulkString(value);
+            }
+            else
+            {
+                reply = "$-1\r\n";
+            }
         }
         else
         {
@@ -49,3 +72,5 @@ async Task HandleClientAsync(Socket client)
 
     client.Close();
 }
+
+string BulkString(string text) => $"${Encoding.UTF8.GetByteCount(text)}\r\n{text}\r\n";
