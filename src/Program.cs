@@ -135,6 +135,25 @@ async Task HandleClientAsync(Socket client)
             }
             reply = $":{count}\r\n";
         }
+        else if (command == "LPOP")
+        {
+            string key = parts[4];
+
+            reply = "$-1\r\n";
+
+            if (lists.TryGetValue(key, out List<string>? list))
+            {
+                lock (list)
+                {
+                    if (list.Count > 0)
+                    {
+                        string first = list[0];
+                        list.RemoveAt(0);
+                        reply = BulkString(first);
+                    }
+                }
+            }
+        }
         else if (command == "LRANGE")
         {
             string key = parts[4];
