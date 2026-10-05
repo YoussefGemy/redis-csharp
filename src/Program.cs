@@ -9,7 +9,7 @@ Console.WriteLine("Logs from your program will appear here!");
 TcpListener server = new TcpListener(IPAddress.Any, 6379);
 server.Start();
 
-ConcurrentDictionary<string, string> store = new();
+ConcurrentDictionary<string, (string Value, DateTime? ExpiresAt)> store = new();
 
 while (true)
 {
@@ -45,7 +45,24 @@ async Task HandleClientAsync(Socket client)
             string key = parts[4];
             string value = parts[6];
 
-            store[key] = value;
+            DateTime? expiresAt = null;
+
+            if (parts.Length > 10)
+            {
+                string option = parts[8].ToUpper();
+                long amount = long.Parse(parts[10]);
+
+                if (option == "PX")
+                {
+                    expiresAt = DateTime.UtcNow.AddMilliseconds(amount);
+                }
+                else if (option == "EX")
+                {
+                    expiresAt = DateTime.UtcNow.AddSeconds(amount);
+                }
+            }
+
+            store[key] = (value, expiresAt);
 
             reply = "+OK\r\n";
         }
@@ -53,13 +70,18 @@ async Task HandleClientAsync(Socket client)
         {
             string key = parts[4];
 
-            if (store.TryGetValue(key, out string? value))
+            if (!store.TryGetValue(key, out var entry))
             {
-                reply = BulkString(value);
+                reply = "$-1\r\n";
+            }
+            else if (entry.ExpiresAt != null && DateTime.UtcNow >= entry.ExpiresAt)
+            {
+                store.TryRemove(key, out _);
+                reply = "$-1\r\n";
             }
             else
             {
-                reply = "$-1\r\n";
+                reply = BulkString(entry.Value);
             }
         }
         else
