@@ -121,6 +121,20 @@ async Task HandleClientAsync(Socket client)
 
             reply = $":{count}\r\n";
         }
+        else if (command == "LLEN")
+        {
+            string key = parts[4];
+
+            int count = 0;
+            if (lists.TryGetValue(key, out List<string>? list))
+            {
+                lock (list)
+                {
+                    count = list.Count;
+                }                
+            }
+            reply = $":{count}\r\n";
+        }
         else if (command == "LRANGE")
         {
             string key = parts[4];
