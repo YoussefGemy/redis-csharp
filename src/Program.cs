@@ -103,6 +103,24 @@ async Task HandleClientAsync(Socket client)
 
             reply = $":{count}\r\n";
         }
+        else if (command == "LPUSH")
+        {
+            string key = parts[4];
+            List<string> list = lists.GetOrAdd(key, _ => new List<string>());
+
+            int count;
+
+            lock (list)
+            {
+                for (int i = 6; i < parts.Length; i += 2)
+                {
+                    list.Insert(0, parts[i]);
+                }
+                count = list.Count;
+            }
+
+            reply = $":{count}\r\n";
+        }
         else if (command == "LRANGE")
         {
             string key = parts[4];
