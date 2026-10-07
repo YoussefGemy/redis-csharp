@@ -11,6 +11,7 @@ server.Start();
 
 ConcurrentDictionary<string, (string Value, DateTime? ExpiresAt)> store = new();
 ConcurrentDictionary<string, List<string>> lists = new();
+ConcurrentDictionary<string, Queue<TaskCompletionSource<string>>> waiters = new();
 
 while (true)
 {
@@ -99,6 +100,7 @@ async Task HandleClientAsync(Socket client)
                     list.Add(parts[i]);
                 }
                 count = list.Count;
+                ServeWaiters(key, list);
             }
 
             reply = $":{count}\r\n";
@@ -117,6 +119,7 @@ async Task HandleClientAsync(Socket client)
                     list.Insert(0, parts[i]);
                 }
                 count = list.Count;
+                ServeWaiters(key, list);
             }
 
             reply = $":{count}\r\n";
@@ -180,6 +183,35 @@ async Task HandleClientAsync(Socket client)
                 }
             }
         }
+        else if (command == "BLPOP")
+        {
+            string key = parts[4];
+            List<string> list = lists.GetOrAdd(key, _ => new List<string>());
+
+            string? value = null;
+            TaskCompletionSource<string>? waiter = null;
+
+            lock (list)
+            {
+                if (list.Count > 0)
+                {
+                    value = list[0];
+                    list.RemoveAt(0);
+                }
+                else
+                {
+                    waiter = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+                    waiters.GetOrAdd(key, _ => new Queue<TaskCompletionSource<string>>()).Enqueue(waiter);
+                }
+            }
+
+            if (waiter != null)
+            {
+                value = await waiter.Task;
+            }
+
+            reply = $"*2\r\n{BulkString(key)}{BulkString(value!)}";
+        }
         else if (command == "LRANGE")
         {
             string key = parts[4];
@@ -234,6 +266,21 @@ async Task HandleClientAsync(Socket client)
     }
 
     client.Close();
+}
+
+void ServeWaiters(string key, List<string> list)
+{
+    if (!waiters.TryGetValue(key, out Queue<TaskCompletionSource<string>>? queue)) return;
+
+    while (queue.Count > 0 && list.Count > 0)
+    {
+        TaskCompletionSource<string> waiter = queue.Dequeue();
+
+        string value = list[0];
+        list.RemoveAt(0);
+
+        waiter.SetResult(value);
+    }
 }
 
 string BulkString(string text) => $"${Encoding.UTF8.GetByteCount(text)}\r\n{text}\r\n";
