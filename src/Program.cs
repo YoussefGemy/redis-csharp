@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -186,6 +187,13 @@ async Task HandleClientAsync(Socket client)
         else if (command == "BLPOP")
         {
             string key = parts[4];
+
+            double timeoutSeconds = double.Parse(parts[6], CultureInfo.InvariantCulture);
+
+            TimeSpan timeout = timeoutSeconds == 0
+                ? Timeout.InfiniteTimeSpan
+                : TimeSpan.FromSeconds(timeoutSeconds);
+
             List<string> list = lists.GetOrAdd(key, _ => new List<string>());
 
             string? value = null;
@@ -207,10 +215,17 @@ async Task HandleClientAsync(Socket client)
 
             if (waiter != null)
             {
-                value = await waiter.Task;
+                await Task.WhenAny(waiter.Task, Task.Delay(timeout));
+
+                if (!waiter.TrySetCanceled())
+                {
+                    value = await waiter.Task;
+                }
             }
 
-            reply = $"*2\r\n{BulkString(key)}{BulkString(value!)}";
+            reply = value == null
+                ? "*-1\r\n"
+                : $"*2\r\n{BulkString(key)}{BulkString(value)}";
         }
         else if (command == "LRANGE")
         {
@@ -276,10 +291,10 @@ void ServeWaiters(string key, List<string> list)
     {
         TaskCompletionSource<string> waiter = queue.Dequeue();
 
-        string value = list[0];
-        list.RemoveAt(0);
-
-        waiter.SetResult(value);
+        if (waiter.TrySetResult(list[0]))
+        {
+            list.RemoveAt(0);
+        }
     }
 }
 
