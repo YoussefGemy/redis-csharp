@@ -8,14 +8,19 @@ public class ClientConnection
     private readonly Socket _socket;
     private readonly CommandExecutor _executor;
 
+    private readonly DataStore _db;
+
     private readonly byte[] _buffer = new byte[1024];
     private bool _inMulti = false;
     private readonly List<string[]> _queued = new();
 
-    public ClientConnection(Socket socket, CommandExecutor executor)
+    private readonly Dictionary<string, long> _watched = new();
+
+    public ClientConnection(Socket socket, CommandExecutor executor, DataStore db)
     {
         _socket = socket;
         _executor = executor;
+        _db = db;
     }
 
     public async Task RunAsync()
@@ -41,14 +46,24 @@ public class ClientConnection
                 {
                     _inMulti = false;
 
-                    reply = $"*{_queued.Count}\r\n";
+                    bool watchedKeyChanged = _watched.Any(w => _db.GetVersion(w.Key) != w.Value);
 
-                    foreach (string[] queuedParts in _queued)
+                    if (watchedKeyChanged)
                     {
-                        reply += await _executor.ExecuteAsync(queuedParts);
+                        reply = "*-1\r\n";
+                    }
+                    else
+                    {
+                        reply = $"*{_queued.Count}\r\n";
+
+                        foreach (string[] queuedParts in _queued)
+                        {
+                            reply += await _executor.ExecuteAsync(queuedParts);
+                        }
                     }
 
                     _queued.Clear();
+                    _watched.Clear();
                 }
             }
             else if (command == "DISCARD")
@@ -62,6 +77,7 @@ public class ClientConnection
                     _inMulti = false;
                     reply = "+OK\r\n";
                     _queued.Clear();
+                    _watched.Clear();
                 }
             }
             else if (command == "WATCH")
@@ -72,6 +88,11 @@ public class ClientConnection
                 }
                 else
                 {
+                    for (int i = 4; i < parts.Length; i += 2)
+                    {
+                        _watched.TryAdd(parts[i], _db.GetVersion(parts[i]));
+                    }
+
                     reply = "+OK\r\n";
                 }
             }

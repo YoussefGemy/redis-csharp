@@ -14,5 +14,5 @@ CommandExecutor executor = new(db);
 while (true)
 {
     Socket client = await server.AcceptSocketAsync(); // wait for client
-    _ = new ClientConnection(client, executor).RunAsync();
+    _ = new ClientConnection(client, executor, db).RunAsync();
 }

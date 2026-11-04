@@ -50,6 +50,8 @@ public class CommandExecutor
 
             _db.Store[key] = (value, expiresAt);
 
+            _db.Touch(key);
+
             reply = "+OK\r\n";
         }
         else if (command == "INCR")
@@ -59,6 +61,7 @@ public class CommandExecutor
                 (entry.ExpiresAt != null && DateTime.UtcNow >= entry.ExpiresAt))
             {
                 _db.Store[key] = ("1", null);
+                _db.Touch(key);
                 reply = ":1\r\n";
             }
             else if (!long.TryParse(entry.Value, out long number))
@@ -72,6 +75,7 @@ public class CommandExecutor
                     number++;
                     _db.Store[key] = (number.ToString(), entry.ExpiresAt);
                 }
+                _db.Touch(key);
                 reply = $":{number}\r\n";
             }
         }
@@ -110,6 +114,8 @@ public class CommandExecutor
                 _db.ServeWaiters(key, list);
             }
 
+            _db.Touch(key);
+
             reply = $":{count}\r\n";
         }
         else if (command == "LPUSH")
@@ -128,6 +134,8 @@ public class CommandExecutor
                 count = list.Count;
                 _db.ServeWaiters(key, list);
             }
+
+            _db.Touch(key);
 
             reply = $":{count}\r\n";
         }
@@ -175,6 +183,8 @@ public class CommandExecutor
 
             if (items.Count > 0)
             {
+                _db.Touch(key);
+
                 if (hasCount)
                 {
                     reply = $"*{items.Count}\r\n";
@@ -211,6 +221,7 @@ public class CommandExecutor
                 {
                     value = list[0];
                     list.RemoveAt(0);
+                    _db.Touch(key);
                 }
                 else
                 {
