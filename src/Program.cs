@@ -36,16 +36,7 @@ async Task HandleClientAsync(Socket client)
 
         string reply;
 
-        if (command == "PING")
-        {
-            reply = "+PONG\r\n";
-        }
-        else if (command == "MULTI")
-        {
-            inMulti = true;
-            reply = "+OK\r\n";
-        }
-        else if (command == "EXEC")
+        if (command == "EXEC")
         {
             if (!inMulti)
             {
@@ -56,6 +47,19 @@ async Task HandleClientAsync(Socket client)
                 inMulti = false;
                 reply = "*0\r\n";
             }
+        }
+        else if (inMulti)
+        {
+            reply = "+QUEUED\r\n";
+        }
+        else if (command == "PING")
+        {
+            reply = "+PONG\r\n";
+        }
+        else if (command == "MULTI")
+        {
+            inMulti = true;
+            reply = "+OK\r\n";
         }
         else if (command == "ECHO")
         {
