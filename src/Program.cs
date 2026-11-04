@@ -39,6 +39,10 @@ async Task HandleClientAsync(Socket client)
         {
             reply = "+PONG\r\n";
         }
+        else if (command == "MULTI")
+        {
+            reply = "+OK\r\n";
+        }
         else if (command == "ECHO")
         {
             reply = BulkString(parts[4]);
