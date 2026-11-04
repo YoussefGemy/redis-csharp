@@ -23,6 +23,7 @@ while (true)
 async Task HandleClientAsync(Socket client)
 {
     byte[] buffer = new byte[1024];
+    bool inMulti = false;
 
     while (true)
     {
@@ -41,7 +42,20 @@ async Task HandleClientAsync(Socket client)
         }
         else if (command == "MULTI")
         {
+            inMulti = true;
             reply = "+OK\r\n";
+        }
+        else if (command == "EXEC")
+        {
+            if (!inMulti)
+            {
+                reply = "-ERR EXEC without MULTI\r\n";
+            }
+            else
+            {
+                inMulti = false;
+                reply = "*0\r\n";
+            }
         }
         else if (command == "ECHO")
         {
