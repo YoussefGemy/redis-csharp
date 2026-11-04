@@ -6,6 +6,7 @@ public class DataStore
 {
     public ConcurrentDictionary<string, (string Value, DateTime? ExpiresAt)> Store { get; } = new();
     public ConcurrentDictionary<string, List<string>> Lists { get; } = new();
+    public ConcurrentDictionary<string, List<StreamEntry>> Streams { get; } = new();
     public ConcurrentDictionary<string, Queue<TaskCompletionSource<string>>> Waiters { get; } = new();
 
     private readonly ConcurrentDictionary<string, long> _versions = new();

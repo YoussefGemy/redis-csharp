@@ -109,6 +109,10 @@ public class CommandExecutor
             {
                 reply = "+list\r\n";
             }
+            else if (_db.Streams.TryGetValue(key, out List<StreamEntry>? stream) && stream.Count > 0)
+            {
+                reply = "+stream\r\n";
+            }
             else
             {
                 reply = "+none\r\n";
@@ -305,6 +309,28 @@ public class CommandExecutor
             {
                 reply += BulkString(item);
             }
+        }
+        else if (command == "XADD")
+        {
+            string key = parts[4];
+            string id = parts[6];
+
+            List<(string Field, string Value)> fields = new();
+            for (int i = 8; i + 2 < parts.Length; i += 4)
+            {
+                fields.Add((parts[i], parts[i + 2]));
+            }
+
+            List<StreamEntry> stream = _db.Streams.GetOrAdd(key, _ => new List<StreamEntry>());
+
+            lock (stream)
+            {
+                stream.Add(new StreamEntry(id, fields));
+            }
+
+            _db.Touch(key);
+
+            reply = BulkString(id);
         }
         else
         {
