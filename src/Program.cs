@@ -72,22 +72,24 @@ async Task HandleClientAsync(Socket client)
         else if (command == "INCR")
         {
             string key = parts[4];
-
             if (!store.TryGetValue(key, out var entry) ||
                 (entry.ExpiresAt != null && DateTime.UtcNow >= entry.ExpiresAt))
             {
                 store[key] = ("1", null);
                 reply = ":1\r\n";
             }
+            else if (!long.TryParse(entry.Value, out long number))
+            {
+                reply = "-ERR value is not an integer or out of range\r\n";
+            }
             else
             {
-                long incVal;
                 lock (store)
                 {
-                    incVal = long.Parse(entry.Value) + 1;
-                    store[key] = (incVal.ToString(), entry.ExpiresAt);
+                    number++;
+                    store[key] = (number.ToString(), entry.ExpiresAt);
                 }
-                reply = $":{incVal}\r\n";
+                reply = $":{number}\r\n";
             }
         }
         else if (command == "GET")
