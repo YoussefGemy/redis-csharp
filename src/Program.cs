@@ -71,6 +71,17 @@ async Task HandleClientAsync(Socket client)
                 queued.Clear();
             }
         }
+        else if (command == "WATCH")
+        {
+            if (inMulti)
+            {
+                reply = "-ERR WATCH inside MULTI is not allowed\r\n";
+            }
+            else
+            {
+                reply = "+OK\r\n";
+            }
+        }
         else if (inMulti)
         {
             queued.Add(parts);
