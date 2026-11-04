@@ -25,8 +25,10 @@ async Task HandleClientAsync(Socket client)
     byte[] buffer = new byte[1024];
     bool inMulti = false;
 
+    List<string[]> queued = new();
+
     while (true)
-    {
+    { 
         int bytesRead = await client.ReceiveAsync(buffer); // wait for the client's command
         if (bytesRead == 0) break;
 
@@ -45,287 +47,310 @@ async Task HandleClientAsync(Socket client)
             else
             {
                 inMulti = false;
-                reply = "*0\r\n";
+
+                reply = $"*{queued.Count}\r\n";
+
+                foreach (string[] queuedParts in queued)
+                {
+                    reply += await ExecuteAsync(queuedParts);
+                }
+
+                queued.Clear();
             }
         }
         else if (inMulti)
         {
+            queued.Add(parts);
             reply = "+QUEUED\r\n";
-        }
-        else if (command == "PING")
-        {
-            reply = "+PONG\r\n";
         }
         else if (command == "MULTI")
         {
             inMulti = true;
             reply = "+OK\r\n";
         }
-        else if (command == "ECHO")
-        {
-            reply = BulkString(parts[4]);
-        }
-        else if (command == "SET")
-        {
-            string key = parts[4];
-            string value = parts[6];
-
-            DateTime? expiresAt = null;
-
-            if (parts.Length > 10)
-            {
-                string option = parts[8].ToUpper();
-                long amount = long.Parse(parts[10]);
-
-                if (option == "PX")
-                {
-                    expiresAt = DateTime.UtcNow.AddMilliseconds(amount);
-                }
-                else if (option == "EX")
-                {
-                    expiresAt = DateTime.UtcNow.AddSeconds(amount);
-                }
-            }
-
-            store[key] = (value, expiresAt);
-
-            reply = "+OK\r\n";
-        }
-        else if (command == "INCR")
-        {
-            string key = parts[4];
-            if (!store.TryGetValue(key, out var entry) ||
-                (entry.ExpiresAt != null && DateTime.UtcNow >= entry.ExpiresAt))
-            {
-                store[key] = ("1", null);
-                reply = ":1\r\n";
-            }
-            else if (!long.TryParse(entry.Value, out long number))
-            {
-                reply = "-ERR value is not an integer or out of range\r\n";
-            }
-            else
-            {
-                lock (store)
-                {
-                    number++;
-                    store[key] = (number.ToString(), entry.ExpiresAt);
-                }
-                reply = $":{number}\r\n";
-            }
-        }
-        else if (command == "GET")
-        {
-            string key = parts[4];
-
-            if (!store.TryGetValue(key, out var entry))
-            {
-                reply = "$-1\r\n";
-            }
-            else if (entry.ExpiresAt != null && DateTime.UtcNow >= entry.ExpiresAt)
-            {
-                store.TryRemove(key, out _);
-                reply = "$-1\r\n";
-            }
-            else
-            {
-                reply = BulkString(entry.Value);
-            }
-        }
-        else if (command == "RPUSH")
-        {
-            string key = parts[4];
-            List<string> list = lists.GetOrAdd(key, _ => new List<string>());
-
-            int count;
-
-            lock (list)
-            {
-                for (int i = 6; i < parts.Length; i += 2)
-                {
-                    list.Add(parts[i]);
-                }
-                count = list.Count;
-                ServeWaiters(key, list);
-            }
-
-            reply = $":{count}\r\n";
-        }
-        else if (command == "LPUSH")
-        {
-            string key = parts[4];
-            List<string> list = lists.GetOrAdd(key, _ => new List<string>());
-
-            int count;
-
-            lock (list)
-            {
-                for (int i = 6; i < parts.Length; i += 2)
-                {
-                    list.Insert(0, parts[i]);
-                }
-                count = list.Count;
-                ServeWaiters(key, list);
-            }
-
-            reply = $":{count}\r\n";
-        }
-        else if (command == "LLEN")
-        {
-            string key = parts[4];
-
-            int count = 0;
-            if (lists.TryGetValue(key, out List<string>? list))
-            {
-                lock (list)
-                {
-                    count = list.Count;
-                }                
-            }
-            reply = $":{count}\r\n";
-        }
-        else if (command == "LPOP")
-        {
-            string key = parts[4];
-
-            bool hasCount = parts.Length > 6;
-
-            int NumberOfElements = 1;
-            if (hasCount)
-            {
-                NumberOfElements = int.Parse(parts[6]);
-            }
-
-            List<string> items = new();
-            reply = "$-1\r\n";
-
-            if (lists.TryGetValue(key, out List<string>? list))
-            {
-                lock (list)
-                {
-                    while (list.Count > 0 && NumberOfElements > 0)
-                    {
-                        items.Add(list[0]);
-                        list.RemoveAt(0);
-                        NumberOfElements -= 1;
-                    }
-                }
-            }
-
-            if (items.Count > 0)
-            {
-                if (hasCount)
-                {
-                    reply = $"*{items.Count}\r\n";
-
-                    foreach (string item in items)
-                    {
-                        reply += BulkString(item);
-                    }
-                }
-                else
-                {
-                    reply = BulkString(items[0]);
-                }
-            }
-        }
-        else if (command == "BLPOP")
-        {
-            string key = parts[4];
-
-            double timeoutSeconds = double.Parse(parts[6], CultureInfo.InvariantCulture);
-
-            TimeSpan timeout = timeoutSeconds == 0
-                ? Timeout.InfiniteTimeSpan
-                : TimeSpan.FromSeconds(timeoutSeconds);
-
-            List<string> list = lists.GetOrAdd(key, _ => new List<string>());
-
-            string? value = null;
-            TaskCompletionSource<string>? waiter = null;
-
-            lock (list)
-            {
-                if (list.Count > 0)
-                {
-                    value = list[0];
-                    list.RemoveAt(0);
-                }
-                else
-                {
-                    waiter = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-                    waiters.GetOrAdd(key, _ => new Queue<TaskCompletionSource<string>>()).Enqueue(waiter);
-                }
-            }
-
-            if (waiter != null)
-            {
-                await Task.WhenAny(waiter.Task, Task.Delay(timeout));
-
-                if (!waiter.TrySetCanceled())
-                {
-                    value = await waiter.Task;
-                }
-            }
-
-            reply = value == null
-                ? "*-1\r\n"
-                : $"*2\r\n{BulkString(key)}{BulkString(value)}";
-        }
-        else if (command == "LRANGE")
-        {
-            string key = parts[4];
-            int start = int.Parse(parts[6]);
-            int stop = int.Parse(parts[8]);
-
-            List<string> items = new();
-
-            if (lists.TryGetValue(key, out List<string>? list))
-            {
-                lock (list)
-                {
-                    if (start < 0)
-                    {
-                        start += list.Count;
-                        if (start < 0)
-                        {
-                            start = 0;
-                        }
-                    }
-
-                    if (stop < 0)
-                    {
-                        stop += list.Count;
-                    }
-
-                    if (stop >= list.Count)
-                    {
-                        stop = list.Count - 1;
-                    }
-
-                    for (int i = start; i <= stop; i++)
-                    {
-                        items.Add(list[i]);
-                    }
-                }
-            }
-
-            reply = $"*{items.Count}\r\n";
-
-            foreach (string item in items)
-            {
-                reply += BulkString(item);
-            }
-        }
         else
         {
-            reply = "-ERR unknown command\r\n";
+            reply = await ExecuteAsync(parts);
         }
 
         await client.SendAsync(Encoding.UTF8.GetBytes(reply));
     }
 
     client.Close();
+}
+
+async Task<string> ExecuteAsync(string[] parts)
+{
+    string command = parts[2].ToUpper();
+
+    string reply;
+
+    if (command == "PING")
+    {
+        reply = "+PONG\r\n";
+    }
+    else if (command == "ECHO")
+    {
+        reply = BulkString(parts[4]);
+    }
+    else if (command == "SET")
+    {
+        string key = parts[4];
+        string value = parts[6];
+
+        DateTime? expiresAt = null;
+
+        if (parts.Length > 10)
+        {
+            string option = parts[8].ToUpper();
+            long amount = long.Parse(parts[10]);
+
+            if (option == "PX")
+            {
+                expiresAt = DateTime.UtcNow.AddMilliseconds(amount);
+            }
+            else if (option == "EX")
+            {
+                expiresAt = DateTime.UtcNow.AddSeconds(amount);
+            }
+        }
+
+        store[key] = (value, expiresAt);
+
+        reply = "+OK\r\n";
+    }
+    else if (command == "INCR")
+    {
+        string key = parts[4];
+        if (!store.TryGetValue(key, out var entry) ||
+            (entry.ExpiresAt != null && DateTime.UtcNow >= entry.ExpiresAt))
+        {
+            store[key] = ("1", null);
+            reply = ":1\r\n";
+        }
+        else if (!long.TryParse(entry.Value, out long number))
+        {
+            reply = "-ERR value is not an integer or out of range\r\n";
+        }
+        else
+        {
+            lock (store)
+            {
+                number++;
+                store[key] = (number.ToString(), entry.ExpiresAt);
+            }
+            reply = $":{number}\r\n";
+        }
+    }
+    else if (command == "GET")
+    {
+        string key = parts[4];
+
+        if (!store.TryGetValue(key, out var entry))
+        {
+            reply = "$-1\r\n";
+        }
+        else if (entry.ExpiresAt != null && DateTime.UtcNow >= entry.ExpiresAt)
+        {
+            store.TryRemove(key, out _);
+            reply = "$-1\r\n";
+        }
+        else
+        {
+            reply = BulkString(entry.Value);
+        }
+    }
+    else if (command == "RPUSH")
+    {
+        string key = parts[4];
+        List<string> list = lists.GetOrAdd(key, _ => new List<string>());
+
+        int count;
+
+        lock (list)
+        {
+            for (int i = 6; i < parts.Length; i += 2)
+            {
+                list.Add(parts[i]);
+            }
+            count = list.Count;
+            ServeWaiters(key, list);
+        }
+
+        reply = $":{count}\r\n";
+    }
+    else if (command == "LPUSH")
+    {
+        string key = parts[4];
+        List<string> list = lists.GetOrAdd(key, _ => new List<string>());
+
+        int count;
+
+        lock (list)
+        {
+            for (int i = 6; i < parts.Length; i += 2)
+            {
+                list.Insert(0, parts[i]);
+            }
+            count = list.Count;
+            ServeWaiters(key, list);
+        }
+
+        reply = $":{count}\r\n";
+    }
+    else if (command == "LLEN")
+    {
+        string key = parts[4];
+
+        int count = 0;
+        if (lists.TryGetValue(key, out List<string>? list))
+        {
+            lock (list)
+            {
+                count = list.Count;
+            }                
+        }
+        reply = $":{count}\r\n";
+    }
+    else if (command == "LPOP")
+    {
+        string key = parts[4];
+
+        bool hasCount = parts.Length > 6;
+
+        int NumberOfElements = 1;
+        if (hasCount)
+        {
+            NumberOfElements = int.Parse(parts[6]);
+        }
+
+        List<string> items = new();
+        reply = "$-1\r\n";
+
+        if (lists.TryGetValue(key, out List<string>? list))
+        {
+            lock (list)
+            {
+                while (list.Count > 0 && NumberOfElements > 0)
+                {
+                    items.Add(list[0]);
+                    list.RemoveAt(0);
+                    NumberOfElements -= 1;
+                }
+            }
+        }
+
+        if (items.Count > 0)
+        {
+            if (hasCount)
+            {
+                reply = $"*{items.Count}\r\n";
+
+                foreach (string item in items)
+                {
+                    reply += BulkString(item);
+                }
+            }
+            else
+            {
+                reply = BulkString(items[0]);
+            }
+        }
+    }
+    else if (command == "BLPOP")
+    {
+        string key = parts[4];
+
+        double timeoutSeconds = double.Parse(parts[6], CultureInfo.InvariantCulture);
+
+        TimeSpan timeout = timeoutSeconds == 0
+            ? Timeout.InfiniteTimeSpan
+            : TimeSpan.FromSeconds(timeoutSeconds);
+
+        List<string> list = lists.GetOrAdd(key, _ => new List<string>());
+
+        string? value = null;
+        TaskCompletionSource<string>? waiter = null;
+
+        lock (list)
+        {
+            if (list.Count > 0)
+            {
+                value = list[0];
+                list.RemoveAt(0);
+            }
+            else
+            {
+                waiter = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+                waiters.GetOrAdd(key, _ => new Queue<TaskCompletionSource<string>>()).Enqueue(waiter);
+            }
+        }
+
+        if (waiter != null)
+        {
+            await Task.WhenAny(waiter.Task, Task.Delay(timeout));
+
+            if (!waiter.TrySetCanceled())
+            {
+                value = await waiter.Task;
+            }
+        }
+
+        reply = value == null
+            ? "*-1\r\n"
+            : $"*2\r\n{BulkString(key)}{BulkString(value)}";
+    }
+    else if (command == "LRANGE")
+    {
+        string key = parts[4];
+        int start = int.Parse(parts[6]);
+        int stop = int.Parse(parts[8]);
+
+        List<string> items = new();
+
+        if (lists.TryGetValue(key, out List<string>? list))
+        {
+            lock (list)
+            {
+                if (start < 0)
+                {
+                    start += list.Count;
+                    if (start < 0)
+                    {
+                        start = 0;
+                    }
+                }
+
+                if (stop < 0)
+                {
+                    stop += list.Count;
+                }
+
+                if (stop >= list.Count)
+                {
+                    stop = list.Count - 1;
+                }
+
+                for (int i = start; i <= stop; i++)
+                {
+                    items.Add(list[i]);
+                }
+            }
+        }
+
+        reply = $"*{items.Count}\r\n";
+
+        foreach (string item in items)
+        {
+            reply += BulkString(item);
+        }
+    }
+    else
+    {
+        reply = "-ERR unknown command\r\n";
+    }
+
+    return reply;
 }
 
 void ServeWaiters(string key, List<string> list)
