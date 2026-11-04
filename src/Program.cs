@@ -69,6 +69,27 @@ async Task HandleClientAsync(Socket client)
 
             reply = "+OK\r\n";
         }
+        else if (command == "INCR")
+        {
+            string key = parts[4];
+
+            if (store.TryGetValue(key, out var entry) &&
+                entry.ExpiresAt != null && DateTime.UtcNow >= entry.ExpiresAt)
+            {
+                store.TryRemove(key, out _);
+                reply = "$-1\r\n";
+            }
+            else
+            {
+                long incVal;
+                lock (store)
+                {
+                    incVal = long.Parse(entry.Value) + 1;
+                    store[key] = (incVal.ToString(), entry.ExpiresAt);
+                }
+                reply = $":{incVal}\r\n";
+            }
+        }
         else if (command == "GET")
         {
             string key = parts[4];
