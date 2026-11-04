@@ -73,11 +73,11 @@ async Task HandleClientAsync(Socket client)
         {
             string key = parts[4];
 
-            if (store.TryGetValue(key, out var entry) &&
-                entry.ExpiresAt != null && DateTime.UtcNow >= entry.ExpiresAt)
+            if (!store.TryGetValue(key, out var entry) ||
+                (entry.ExpiresAt != null && DateTime.UtcNow >= entry.ExpiresAt))
             {
-                store.TryRemove(key, out _);
-                reply = "$-1\r\n";
+                store[key] = ("1", null);
+                reply = ":1\r\n";
             }
             else
             {
