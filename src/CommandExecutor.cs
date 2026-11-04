@@ -97,6 +97,23 @@ public class CommandExecutor
                 reply = BulkString(entry.Value);
             }
         }
+        else if (command == "TYPE")
+        {
+            string key = parts[4];
+            if (_db.Store.TryGetValue(key, out var entry) &&
+                (entry.ExpiresAt == null || DateTime.UtcNow < entry.ExpiresAt))
+            {
+                reply = "+string\r\n";
+            }
+            else if (_db.Lists.TryGetValue(key, out List<string>? list) && list.Count > 0)
+            {
+                reply = "+list\r\n";
+            }
+            else
+            {
+                reply = "+none\r\n";
+            }
+        }
         else if (command == "RPUSH")
         {
             string key = parts[4];
