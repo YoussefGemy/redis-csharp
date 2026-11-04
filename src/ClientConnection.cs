@@ -101,6 +101,11 @@ public class ClientConnection
                 _queued.Add(parts);
                 reply = "+QUEUED\r\n";
             }
+            else if (command == "UNWATCH")
+            {
+                _watched.Clear();
+                reply = "+OK\r\n";
+            }
             else if (command == "MULTI")
             {
                 _inMulti = true;
