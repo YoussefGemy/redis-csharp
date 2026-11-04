@@ -6,7 +6,7 @@ A Redis-compatible server written from scratch in C# / .NET — no Redis librari
 
 Built while working through the [CodeCrafters "Build Your Own Redis"](https://codecrafters.io/challenges/redis) challenge.
 
-> **Status: in progress.** Strings, lists (including blocking pops) and transactions work today; optimistic locking, streams and replication are next.
+> **Status: in progress.** Strings, lists (including blocking pops), transactions and `WATCH`-based optimistic locking work today; streams and replication are next.
 
 ## What works
 
@@ -17,14 +17,27 @@ Built while working through the [CodeCrafters "Build Your Own Redis"](https://co
 | Lists | `RPUSH`, `LPUSH`, `LPOP`, `LLEN`, `LRANGE` | `LPOP` with a count, `LRANGE` with negative indexes |
 | Blocking | `BLPOP` | Optional timeout (fractional seconds, `0` = wait forever). Blocked clients are woken in FIFO order when an item is pushed |
 | Transactions | `MULTI`, `EXEC`, `DISCARD` | Commands are queued per connection; a failing command returns its error inside the `EXEC` array while the rest still run |
+| Optimistic locking | `WATCH` | Watch one or more keys; `EXEC` returns a null array and runs nothing if any of them was modified since `WATCH`. Not allowed inside `MULTI` |
 
 ## How it works
 
 - **Concurrency:** each client connection runs on its own async task, so many clients can be served at once without a thread per client.
 - **Storage:** keys live in `ConcurrentDictionary` instances; each list is guarded by its own lock so pushes and pops from different clients don't race.
 - **Blocking pops:** `BLPOP` registers a `TaskCompletionSource` in a per-key queue and races it against a timeout. `RPUSH`/`LPUSH` hand new items directly to waiting clients, longest waiter first. `TrySetResult` / `TrySetCanceled` decide who wins when a push and a timeout happen at the same moment, so a timed-out client never swallows an item.
-- **Transactions:** each connection keeps its own "in a transaction" flag and command queue. Command handling lives in a single `ExecuteAsync` function, so a command runs the same way whether it arrives normally or is replayed by `EXEC`.
+- **Transactions:** each connection keeps its own "in a transaction" flag and command queue. All normal commands go through `CommandExecutor`, so a command runs the same way whether it arrives normally or is replayed by `EXEC`.
+- **Optimistic locking:** every write bumps a per-key version number (like a `RowVersion` column). `WATCH` records the version each key had, and `EXEC` aborts if any of them has moved on.
 - **Protocol:** requests are parsed as RESP arrays of bulk strings, and replies are encoded as simple strings, integers, bulk strings, arrays or errors.
+
+## Project structure
+
+```
+src/
+  Program.cs           starts the TCP listener and creates a ClientConnection per client
+  ClientConnection.cs  one connected client: the read/reply loop and per-client state (transaction queue, watched keys)
+  CommandExecutor.cs   runs normal commands (SET, GET, INCR, RPUSH, BLPOP, ...) against the shared data
+  DataStore.cs         the shared data: strings, lists, blocked BLPOP clients and key versions
+  Resp.cs              RESP encoding helpers
+```
 
 ## Run it
 
@@ -59,11 +72,26 @@ QUEUED
 2) (integer) 42
 ```
 
+Optimistic locking with two clients:
+
+```
+client A> WATCH counter
+OK
+client A> MULTI
+OK
+client A> INCR counter
+QUEUED
+                          client B> SET counter 100
+                          OK
+client A> EXEC
+(nil)          <- aborted, because counter changed after WATCH
+```
+
 ## Roadmap
 
 - [x] `BLPOP` timeout
 - [x] Transactions (`MULTI`, `EXEC`, `DISCARD`)
-- [ ] Optimistic locking (`WATCH`)
+- [ ] Optimistic locking: `WATCH` done, `UNWATCH` next
 - [ ] Robust RESP parsing (multiple commands per packet, requests larger than the read buffer)
 - [ ] `TYPE`, streams (`XADD`, `XRANGE`, `XREAD`)
 - [ ] Pub/Sub, sorted sets
