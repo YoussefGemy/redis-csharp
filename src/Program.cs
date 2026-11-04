@@ -28,7 +28,7 @@ async Task HandleClientAsync(Socket client)
     List<string[]> queued = new();
 
     while (true)
-    { 
+    {
         int bytesRead = await client.ReceiveAsync(buffer); // wait for the client's command
         if (bytesRead == 0) break;
 
@@ -55,6 +55,19 @@ async Task HandleClientAsync(Socket client)
                     reply += await ExecuteAsync(queuedParts);
                 }
 
+                queued.Clear();
+            }
+        }
+        else if (command == "DISCARD")
+        {
+            if (!inMulti)
+            {
+                reply = "-ERR DISCARD without MULTI\r\n";
+            }
+            else
+            {
+                inMulti = false;
+                reply = "+OK\r\n";
                 queued.Clear();
             }
         }
