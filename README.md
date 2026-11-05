@@ -6,18 +6,19 @@ A Redis-compatible server written from scratch in C# / .NET — no Redis librari
 
 Built while working through the [CodeCrafters "Build Your Own Redis"](https://codecrafters.io/challenges/redis) challenge.
 
-> **Status: in progress.** Strings, lists (including blocking pops), transactions and optimistic locking (`WATCH` / `UNWATCH`) work today; streams and replication are next.
+> **Status: in progress.** Strings, lists (including blocking pops), transactions and optimistic locking (`WATCH` / `UNWATCH`) work today. Streams are in progress (`XADD` works; `XRANGE` and `XREAD` are next), then replication.
 
 ## What works
 
 | Area | Commands | Notes |
 |---|---|---|
-| Basics | `PING`, `ECHO` | |
+| Basics | `PING`, `ECHO`, `TYPE` | `TYPE` reports `string`, `list`, `stream` or `none` |
 | Strings | `SET`, `GET`, `INCR` | `SET` supports `PX` / `EX` expiry; expired keys are removed lazily on read. `INCR` creates missing keys and rejects non-integer values |
 | Lists | `RPUSH`, `LPUSH`, `LPOP`, `LLEN`, `LRANGE` | `LPOP` with a count, `LRANGE` with negative indexes |
 | Blocking | `BLPOP` | Optional timeout (fractional seconds, `0` = wait forever). Blocked clients are woken in FIFO order when an item is pushed |
 | Transactions | `MULTI`, `EXEC`, `DISCARD` | Commands are queued per connection; a failing command returns its error inside the `EXEC` array while the rest still run |
 | Optimistic locking | `WATCH`, `UNWATCH` | Watch one or more keys, including keys that don't exist yet; `EXEC` returns a null array and runs nothing if any of them was modified since `WATCH`. Watches are cleared after `EXEC`, `DISCARD` or `UNWATCH`. `WATCH` is not allowed inside `MULTI` |
+| Streams | `XADD` | Explicit IDs (`1526919030474-0`) and auto-generated sequence numbers (`1526919030474-*`). IDs must be strictly increasing and greater than `0-0` |
 
 ## How it works
 
@@ -26,6 +27,7 @@ Built while working through the [CodeCrafters "Build Your Own Redis"](https://co
 - **Blocking pops:** `BLPOP` registers a `TaskCompletionSource` in a per-key queue and races it against a timeout. `RPUSH`/`LPUSH` hand new items directly to waiting clients, longest waiter first. `TrySetResult` / `TrySetCanceled` decide who wins when a push and a timeout happen at the same moment, so a timed-out client never swallows an item.
 - **Transactions:** each connection keeps its own "in a transaction" flag and command queue. All normal commands go through `CommandExecutor`, so a command runs the same way whether it arrives normally or is replayed by `EXEC`.
 - **Optimistic locking:** every write bumps a per-key version number (like a `RowVersion` column). `WATCH` records the version each key had (a key that was never written counts as version 0, so creating it counts as a change), and `EXEC` aborts if any of them has moved on.
+- **Streams:** each stream is an append-only list of entries. Entry IDs are stored as two numbers (milliseconds, sequence) and compared as a tuple, so `10-0` correctly sorts after `9-0`. Generating a sequence number and validating the ID happen under the same lock as the append, so concurrent `XADD`s can't produce out-of-order IDs.
 - **Protocol:** requests are parsed as RESP arrays of bulk strings, and replies are encoded as simple strings, integers, bulk strings, arrays or errors.
 
 ## Project structure
@@ -34,8 +36,9 @@ Built while working through the [CodeCrafters "Build Your Own Redis"](https://co
 src/
   Program.cs           starts the TCP listener and creates a ClientConnection per client
   ClientConnection.cs  one connected client: the read/reply loop and per-client state (transaction queue, watched keys)
-  CommandExecutor.cs   runs normal commands (SET, GET, INCR, RPUSH, BLPOP, ...) against the shared data
-  DataStore.cs         the shared data: strings, lists, blocked BLPOP clients and key versions
+  CommandExecutor.cs   runs normal commands (SET, GET, INCR, RPUSH, BLPOP, XADD, ...) against the shared data
+  DataStore.cs         the shared data: strings, lists, streams, blocked BLPOP clients and key versions
+  StreamEntry.cs       one stream entry: its ID (milliseconds + sequence) and field-value pairs
   Resp.cs              RESP encoding helpers
 ```
 
@@ -56,6 +59,8 @@ redis-cli GET greeting
 redis-cli RPUSH queue a b c
 redis-cli LRANGE queue 0 -1
 redis-cli BLPOP queue 0.5
+redis-cli XADD sensor 1526919030474-0 temperature 36 humidity 95
+redis-cli TYPE sensor
 ```
 
 A transaction, from an interactive `redis-cli` session:
@@ -93,6 +98,7 @@ client A> EXEC
 - [x] Transactions (`MULTI`, `EXEC`, `DISCARD`)
 - [x] Optimistic locking (`WATCH`, `UNWATCH`)
 - [ ] Robust RESP parsing (multiple commands per packet, requests larger than the read buffer)
-- [ ] `TYPE`, streams (`XADD`, `XRANGE`, `XREAD`)
+- [x] `TYPE`
+- [ ] Streams: `XADD` done; fully auto-generated IDs (`*`), `XRANGE` and `XREAD` next
 - [ ] Pub/Sub, sorted sets
 - [ ] RDB / AOF persistence and leader/follower replication
