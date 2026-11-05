@@ -373,7 +373,9 @@ public class CommandExecutor
             string key = parts[4];
 
             (long Ms, long Seq) start = (parts[6] == "-") ? (0, 0) : ParseRangeId(parts[6], 0);
-            (long Ms, long Seq) end = ParseRangeId(parts[8], long.MaxValue);
+            (long Ms, long Seq) end = (parts[8] == "+")
+                ? (long.MaxValue, long.MaxValue)
+                : ParseRangeId(parts[8], long.MaxValue);
 
             List<StreamEntry> matches = new();
 
