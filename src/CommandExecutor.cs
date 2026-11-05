@@ -322,10 +322,9 @@ public class CommandExecutor
                 fields.Add((parts[i], parts[i + 2]));
             }
 
-            long ms = long.Parse(idParts[0]);
-
-            bool autoSeq = idParts[1] == "*";
+            bool autoSeq = (parts[6] == "*") || (idParts[1] == "*");
             long seq = autoSeq ? 0 : long.Parse(idParts[1]);
+            long ms = parts[6] == "*" ? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() : long.Parse(idParts[0]);
 
             if (autoSeq || !(ms == 0 && seq == 0))
             {
