@@ -368,11 +368,53 @@ public class CommandExecutor
                 reply = "-ERR The ID specified in XADD must be greater than 0-0\r\n";
             }
         }
+        else if (command == "XRANGE")
+        {
+            string key = parts[4];
+
+            (long Ms, long Seq) start = ParseRangeId(parts[6], 0);
+            (long Ms, long Seq) end = ParseRangeId(parts[8], long.MaxValue);
+
+            List<StreamEntry> matches = new();
+
+            if (_db.Streams.TryGetValue(key, out List<StreamEntry>? stream))
+            {
+                lock (stream)
+                {
+                    foreach (StreamEntry entry in stream)
+                    {
+                        (long, long) id = (entry.Ms, entry.Seq);
+                        if (id.CompareTo(start) >= 0 && id.CompareTo(end) <= 0)
+                        {
+                            matches.Add(entry);
+                        }
+                    }
+                }
+            }
+
+            reply = $"*{matches.Count}\r\n";
+
+            foreach (StreamEntry entry in matches)
+            {
+                reply += EncodeEntry(entry);
+            }
+        }
         else
         {
             reply = "-ERR unknown command\r\n";
         }
 
         return reply;
+    }
+
+    private static (long Ms, long Seq) ParseRangeId(string id, long defaultSeq)
+    {
+        string[] idParts = id.Split('-');
+
+        long ms = long.Parse(idParts[0]);
+
+        long seq = idParts.Length > 1 ? long.Parse(idParts[1]) : defaultSeq;
+
+        return (ms, seq);
     }
 }
