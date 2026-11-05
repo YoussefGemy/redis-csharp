@@ -313,7 +313,10 @@ public class CommandExecutor
         else if (command == "XADD")
         {
             string key = parts[4];
-            string id = parts[6];
+
+            string[] idParts = parts[6].Split('-');
+            long ms = long.Parse(idParts[0]);
+            long seq = long.Parse(idParts[1]);
 
             List<(string Field, string Value)> fields = new();
             for (int i = 8; i + 2 < parts.Length; i += 4)
@@ -321,16 +324,35 @@ public class CommandExecutor
                 fields.Add((parts[i], parts[i + 2]));
             }
 
-            List<StreamEntry> stream = _db.Streams.GetOrAdd(key, _ => new List<StreamEntry>());
-
-            lock (stream)
+            if (ms == 0 && seq == 0)
             {
-                stream.Add(new StreamEntry(id, fields));
+                reply = "-ERR The ID specified in XADD must be greater than 0-0\r\n";
             }
+            else
+            {
+                List<StreamEntry> stream = _db.Streams.GetOrAdd(key, _ => new List<StreamEntry>());
 
-            _db.Touch(key);
+                StreamEntry? added = null;
 
-            reply = BulkString(id);
+                lock (stream)
+                {
+                    if (stream.Count == 0 || (ms, seq).CompareTo((stream[^1].Ms, stream[^1].Seq)) > 0)
+                    {
+                        added = new StreamEntry(ms, seq, fields);
+                        stream.Add(added);
+                    }
+                }
+
+                if (added == null)
+                {
+                    reply = "-ERR The ID specified in XADD is equal or smaller than the target stream top item\r\n";
+                }
+                else
+                {
+                    _db.Touch(key);
+                    reply = BulkString(added.Id);
+                }
+            }
         }
         else
         {
