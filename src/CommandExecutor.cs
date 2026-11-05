@@ -315,8 +315,6 @@ public class CommandExecutor
             string key = parts[4];
 
             string[] idParts = parts[6].Split('-');
-            long ms = long.Parse(idParts[0]);
-            long seq = long.Parse(idParts[1]);
 
             List<(string Field, string Value)> fields = new();
             for (int i = 8; i + 2 < parts.Length; i += 4)
@@ -324,11 +322,12 @@ public class CommandExecutor
                 fields.Add((parts[i], parts[i + 2]));
             }
 
-            if (ms == 0 && seq == 0)
-            {
-                reply = "-ERR The ID specified in XADD must be greater than 0-0\r\n";
-            }
-            else
+            long ms = long.Parse(idParts[0]);
+
+            bool autoSeq = idParts[1] == "*";
+            long seq = autoSeq ? 0 : long.Parse(idParts[1]);
+
+            if (autoSeq || !(ms == 0 && seq == 0))
             {
                 List<StreamEntry> stream = _db.Streams.GetOrAdd(key, _ => new List<StreamEntry>());
 
@@ -336,6 +335,18 @@ public class CommandExecutor
 
                 lock (stream)
                 {
+                    if (autoSeq)
+                    {
+                        if (stream.Count > 0 && stream[^1].Ms == ms)
+                        {
+                            seq = stream[^1].Seq + 1;
+                        }
+                        else
+                        {
+                            seq = ms == 0 ? 1 : 0;
+                        }
+                    }
+
                     if (stream.Count == 0 || (ms, seq).CompareTo((stream[^1].Ms, stream[^1].Seq)) > 0)
                     {
                         added = new StreamEntry(ms, seq, fields);
@@ -352,6 +363,10 @@ public class CommandExecutor
                     _db.Touch(key);
                     reply = BulkString(added.Id);
                 }
+            }
+            else
+            {
+                reply = "-ERR The ID specified in XADD must be greater than 0-0\r\n";
             }
         }
         else
