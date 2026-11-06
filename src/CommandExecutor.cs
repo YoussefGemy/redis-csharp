@@ -403,40 +403,58 @@ public class CommandExecutor
         }
         else if (command == "XREAD")
         {
-            string key = parts[6];
+            int argCount = int.Parse(parts[0].Substring(1));
 
-            (long Ms, long Seq) afterId = ParseRangeId(parts[8], 0);
+            int streamCount = (argCount - 2) / 2;
 
-            List<StreamEntry> matches = new();
+            List<string> streamReplies = new();
 
-            if (_db.Streams.TryGetValue(key, out List<StreamEntry>? stream))
+            for (int i = 0; i < streamCount; i++)
             {
-                lock (stream)
-                {
-                    foreach (StreamEntry entry in stream)
-                    {
-                        (long, long) id = (entry.Ms, entry.Seq);
+                string key = parts[6 + 2 * i];
 
-                        if (id.CompareTo(afterId) > 0)
+                (long Ms, long Seq) afterId = ParseRangeId(parts[6 + 2 * (streamCount + i)], 0);
+
+                List<StreamEntry> matches = new();
+
+                if (_db.Streams.TryGetValue(key, out List<StreamEntry>? stream))
+                {
+                    lock (stream)
+                    {
+                        foreach (StreamEntry entry in stream)
                         {
-                            matches.Add(entry);
+                            (long, long) id = (entry.Ms, entry.Seq);
+
+                            if (id.CompareTo(afterId) > 0)
+                            {
+                                matches.Add(entry);
+                            }
                         }
                     }
                 }
+
+                if (matches.Count == 0)
+                {
+                    continue;
+                }
+
+                string streamReply = $"*2\r\n{BulkString(key)}*{matches.Count}\r\n";
+
+                foreach (StreamEntry entry in matches)
+                {
+                    streamReply += EncodeEntry(entry);
+                }
+
+                streamReplies.Add(streamReply);
             }
 
-            if (matches.Count == 0)
+            if (streamReplies.Count == 0)
             {
                 reply = "*-1\r\n";
             }
             else
             {
-                reply = $"*1\r\n*2\r\n{BulkString(key)}*{matches.Count}\r\n";
-
-                foreach (StreamEntry entry in matches)
-                {
-                    reply += EncodeEntry(entry);
-                }
+                reply = $"*{streamReplies.Count}\r\n" + string.Concat(streamReplies);
             }
         }
         else
