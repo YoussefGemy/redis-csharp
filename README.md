@@ -6,7 +6,7 @@ A Redis-compatible server written from scratch in C# / .NET — no Redis librari
 
 Built while working through the [CodeCrafters "Build Your Own Redis"](https://codecrafters.io/challenges/redis) challenge.
 
-> **Status: in progress.** Strings, lists (including blocking pops), transactions and optimistic locking (`WATCH` / `UNWATCH`) work today. Streams are in progress (`XADD`, `XRANGE` and single-stream `XREAD` work; multi-stream and blocking `XREAD` are next), then replication.
+> **Status: in progress.** Strings, lists (including blocking pops), transactions and optimistic locking (`WATCH` / `UNWATCH`) work today. Streams are in progress (`XADD`, `XRANGE` and `XREAD` across one or more streams work; blocking `XREAD` is next), then replication.
 
 ## What works
 
@@ -18,7 +18,7 @@ Built while working through the [CodeCrafters "Build Your Own Redis"](https://co
 | Blocking | `BLPOP` | Optional timeout (fractional seconds, `0` = wait forever). Blocked clients are woken in FIFO order when an item is pushed |
 | Transactions | `MULTI`, `EXEC`, `DISCARD` | Commands are queued per connection; a failing command returns its error inside the `EXEC` array while the rest still run |
 | Optimistic locking | `WATCH`, `UNWATCH` | Watch one or more keys, including keys that don't exist yet; `EXEC` returns a null array and runs nothing if any of them was modified since `WATCH`. Watches are cleared after `EXEC`, `DISCARD` or `UNWATCH`. `WATCH` is not allowed inside `MULTI` |
-| Streams | `XADD`, `XRANGE`, `XREAD` | `XADD` takes explicit IDs (`1526919030474-0`), an auto-generated sequence number (`1526919030474-*`) or a fully auto-generated ID (`*`); IDs must be strictly increasing and greater than `0-0`. `XRANGE` returns entries in an inclusive range, with `-` / `+` for the start / end of the stream. `XREAD STREAMS` returns entries strictly after a given ID (one stream for now) |
+| Streams | `XADD`, `XRANGE`, `XREAD` | `XADD` takes explicit IDs (`1526919030474-0`), an auto-generated sequence number (`1526919030474-*`) or a fully auto-generated ID (`*`); IDs must be strictly increasing and greater than `0-0`. `XRANGE` returns entries in an inclusive range, with `-` / `+` for the start / end of the stream. `XREAD STREAMS` reads one or more streams at once, returning each stream's entries strictly after its given ID, in the order the keys were listed; streams with nothing new are left out |
 
 ## How it works
 
@@ -63,6 +63,8 @@ redis-cli XADD sensor 1526919030474-0 temperature 36 humidity 95
 redis-cli XADD sensor '*' temperature 37
 redis-cli XRANGE sensor - +
 redis-cli XREAD STREAMS sensor 1526919030474-0
+redis-cli XADD weather 1-1 wind 12
+redis-cli XREAD STREAMS sensor weather 0-0 0-0
 redis-cli TYPE sensor
 ```
 
@@ -102,6 +104,6 @@ client A> EXEC
 - [x] Optimistic locking (`WATCH`, `UNWATCH`)
 - [ ] Robust RESP parsing (multiple commands per packet, requests larger than the read buffer)
 - [x] `TYPE`
-- [ ] Streams: `XADD`, `XRANGE` and single-stream `XREAD` done; multi-stream `XREAD`, `XREAD BLOCK` and `$` next
+- [ ] Streams: `XADD`, `XRANGE` and multi-stream `XREAD` done; `XREAD BLOCK` and `$` next
 - [ ] Pub/Sub, sorted sets
 - [ ] RDB / AOF persistence and leader/follower replication
